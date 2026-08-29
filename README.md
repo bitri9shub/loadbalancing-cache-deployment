@@ -1,23 +1,23 @@
 # LB-Lab – Mini-Cluster Docker + Redis Cache
 
-> Ce repo est un **lab d'apprentissage**.
-> Il n'est pas destiné à être déployé en production sans ajustements de sécurité et de performance.
+> This repo is a **learning lab**.
+> It is not intended to be deployed in production without security and performance adjustments.
 
 ---
 
-## Table des matières
+## Table of Contents
 
 | # | Section | Description |
 |---|---------|-------------|
-| 1 | Architecture | Vue d'ensemble (diagramme) |
-| 2 | Déploiement Vagrant | Processus d'orchestration par Vagrant |
-| 3 | Installation & démarrage | Comment lancer le cluster avec Vagrant |
-| 4 | Docker components | Diagramme détaillé des conteneurs par VM |
-| 5 | Concepts clés du caching | TTL, éviction, hit/miss, cache local vs partagé |
-| 6 | Nginx caching en détail | `proxy_cache_path`, `proxy_cache`, et directives associées |
-| 7 | Benchmark | Outils & commandes pour mesurer les temps de réponse |
+| 1 | Architecture | Overview (diagram) |
+| 2 | Vagrant Deployment | Vagrant orchestration process |
+| 3 | Installation & Startup | How to launch the cluster with Vagrant |
+| 4 | Docker Components | Detailed diagram of containers per VM |
+| 5 | Key Caching Concepts | TTL, eviction, hit/miss, local vs shared cache |
+| 6 | Nginx Caching in Detail | `proxy_cache_path`, `proxy_cache`, and related directives |
+| 7 | Benchmark | Tools & commands to measure response times |
 
-> Le contenu ci-dessous suit l'ordre logique de construction du lab : d'abord comprendre l'architecture, puis comment Vagrant l'orchestre, puis comment la démarrer, puis le détail des composants et des concepts de caching, et enfin comment mesurer les résultats.
+> The content below follows the logical build order of the lab: first understand the architecture, then how Vagrant orchestrates it, then how to start it, then the details of the components and caching concepts, and finally how to measure the results.
 
 ---
 
@@ -25,54 +25,54 @@
 
 ![architecture.png](architecture/architecture.png)
 
-Le diagramme montre :
+The diagram shows:
 
-- Un load balancer Nginx distribuant sur trois nœuds Web (`web1`, `web2` et `web3`).
-- Chaque nœud possède son propre Nginx local avec cache HTTP (`my_cache`).
-- Toutes les applications se connectent à un serveur Redis central (`192.168.56.20`).
+- An Nginx load balancer distributing across three Web nodes (`web1`, `web2`, and `web3`).
+- Each Web node has its own local Nginx with an HTTP cache (`my_cache`).
+- All applications connect to a central Redis server (`192.168.56.20`).
 
 ---
 
-## 2. Déploiement Vagrant – Orchestration
+## 2. Vagrant Deployment – Orchestration
 
 ![vagrant_deployment.png](architecture/vagrant_deployment.png)
 
-Le fichier `Vagrantfile` crée cinq VM :
+The `Vagrantfile` creates five VMs:
 
 ```
-lb          -> Load Balancer      (192.168.56.10)
-redis       -> Cache Redis Central (192.168.56.20)
-web{1..3}   -> Trois nœuds Web identiques (192.168.56.11-13)
+lb          -> Load Balancer       (192.168.56.10)
+redis       -> Central Redis Cache (192.168.56.20)
+web{1..3}   -> Three identical Web nodes (192.168.56.11-13)
 ```
 
-Chaque VM exécute son propre script de provision :
+Each VM runs its own provisioning script:
 
-- `provision/provision-lb.sh` → Installe Docker + lance le conteneur Nginx (load balancing).
-- `provision/provision-redis.sh` → Installe Docker + lance Redis et Redis Insight.
-- `provision/provision-web.sh` → Installe Docker + lance la pile de conteneurs (Nginx + App Python) sur chaque nœud.
+- `provision/provision-lb.sh` → Installs Docker + launches the Nginx container (load balancing).
+- `provision/provision-redis.sh` → Installs Docker + launches Redis and Redis Insight.
+- `provision/provision-web.sh` → Installs Docker + launches the container stack (Nginx + Python App) on each node.
 
-Les réseaux privés permettent l'accès interne entre tous les services sans exposition publique.
+Private networks allow internal access between all services without public exposure.
 
 ---
 
-## 3. Installation & démarrage
+## 3. Installation & Startup
 
 ```bash
-# Cloner le repo
-git clone https://github.com/<votre-repo>/lb-lab.git
+# Clone the repo
+git clone https://github.com/<your-repo>/lb-lab.git
 cd lb-lab
 
-# Vérifier que VirtualBox + Vagrant sont installés
+# Verify VirtualBox + Vagrant are installed
 vagrant version   # >= 2.x
 virtualbox --help
 
-# Démarrer toutes les VM (5 machines au total)
+# Start all VMs (5 machines total)
 vagrant up
 
-# Attendre ~10-15 min : chaque script provisionne Docker, crée un réseau privé et lance les conteneurs.
+# Wait ~10-15 min: each script provisions Docker, creates a private network and starts the containers.
 ```
 
-### Accès aux machines
+### Accessing the machines
 
 ```bash
 # Load Balancer (Nginx)
@@ -81,61 +81,61 @@ vagrant ssh lb
 # Redis Server
 vagrant ssh redis
 
-# Web nodes (exemple web1)
-vagrant ssh web1   # idem pour web2 / web3
+# Web nodes (example web1)
+vagrant ssh web1   # same for web2 / web3
 ```
 
-### Vérification rapide
+### Quick verification
 
-- **LB** → `http://192.168.56.10/none` → réponse JSON `{"source": "db", "data": "...", "node": "webX"}`
+- **LB** → `http://192.168.56.10/none` → JSON response `{"source": "db", "data": "...", "node": "webX"}`
 - **Redis Insight** → `http://192.168.56.20:5540`
-- **Web node** → `http://192.168.56.{11-13}/redis-only` → JSON indiquant `"source": "redis-cache"` après le premier appel
+- **Web node** → `http://192.168.56.{11-13}/redis-only` → JSON indicating `"source": "redis-cache"` after the first call
 
 ---
 
-## 4. Docker components – Conteneurs par VM
+## 4. Docker Components – Containers per VM
 
 ![docker_components.png](architecture/docker_components.png)
 
-Répartition des conteneurs par machine :
+Container distribution per machine:
 
-- **Load Balancer** : un seul conteneur Nginx exposant le port `80`.
-- **Redis Server** : deux conteneurs (`redis-cache`, `redis-insight`) partagent le même réseau Docker (`redis-net`).
-- **Web nodes** : deux conteneurs par nœud — un conteneur Nginx (reverse proxy + cache HTTP) et un conteneur App Python (Flask) — partageant le même réseau Docker (`web-net`), avec le volume de cache HTTP monté dans le conteneur Nginx.
-
----
-
-## 5. Concepts clés du caching
-
-- **Cache local vs partagé** : le cache HTTP stocke une réponse complète côté serveur ; il ne se partage pas entre plusieurs instances sauf s'il est configuré en cluster ou via un backend partagé comme Redis ou Memcached.
-- **TTL (Time-to-Live)** : durée pendant laquelle une entrée reste valide dans le cache avant d'être invalidée ou rafraîchie.
-- **Eviction policy** : stratégie utilisée quand le pool mémoire est plein (`allkeys-lru`, etc.).
-- **Cache hit/miss ratio** : indicateur clé ; plus c'est proche de 100 % = meilleure performance globale.
+- **Load Balancer**: a single Nginx container exposing port `80`.
+- **Redis Server**: two containers (`redis-cache`, `redis-insight`) sharing the same Docker network (`redis-net`).
+- **Web nodes**: two containers per node — one Nginx container (reverse proxy + HTTP cache) and one Python App container (Flask) — sharing the same Docker network (`web-net`), with the HTTP cache volume mounted in the Nginx container.
 
 ---
 
-## 6. Nginx caching en détail
+## 5. Key Caching Concepts
 
-### `proxy_cache_path` — définir où et comment Nginx stocke le cache
+- **Local vs shared cache**: the HTTP cache stores a complete response server-side; it is not shared between multiple instances unless configured as a cluster or via a shared backend like Redis or Memcached.
+- **TTL (Time-to-Live)**: the duration an entry remains valid in the cache before being invalidated or refreshed.
+- **Eviction policy**: the strategy used when the memory pool is full (`allkeys-lru`, etc.).
+- **Cache hit/miss ratio**: a key indicator; the closer to 100%, the better the overall performance.
 
-Cette directive va dans le bloc `http {}` et configure une zone de cache globale, réutilisable par plusieurs blocs `location`.
+---
+
+## 6. Nginx Caching in Detail
+
+### `proxy_cache_path` — defining where and how Nginx stores the cache
+
+This directive goes in the `http {}` block and configures a global cache zone, reusable by multiple `location` blocks.
 
 ```nginx
 proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=my_cache:10m max_size=100m inactive=60m use_temp_path=off;
 ```
 
-| Paramètre | Rôle |
+| Parameter | Role |
 |---|---|
-| `/var/cache/nginx` | Chemin sur le disque (à l'intérieur du conteneur Nginx) où les fichiers de cache sont physiquement stockés. |
-| `levels=1:2` | Organise les fichiers cachés dans une arborescence de sous-dossiers à 2 niveaux (basée sur un hash de l'URL), pour éviter d'avoir des milliers de fichiers dans un seul dossier — une optimisation du système de fichiers, sans impact fonctionnel. |
-| `keys_zone=my_cache:10m` | Crée une zone mémoire nommée `my_cache`, de 10 Mo, qui stocke les métadonnées du cache (quelles clés existent, où elles pointent sur disque, leur état). Ce nom est réutilisé dans `proxy_cache` pour dire "utilise cette zone-là". |
-| `max_size=100m` | Taille maximale des données mises en cache sur disque avant que Nginx commence à supprimer les entrées les plus anciennes. |
-| `inactive=60m` | Si une entrée en cache n'est pas consultée pendant 60 minutes, elle est supprimée — indépendamment de son propre TTL de fraîcheur. |
-| `use_temp_path=off` | Écrit directement dans le dossier final du cache plutôt que dans un dossier temporaire séparé — plus performant, pratique standard recommandée. |
+| `/var/cache/nginx` | Path on disk (inside the Nginx container) where cache files are physically stored. |
+| `levels=1:2` | Organizes cached files into a 2-level subdirectory tree (based on a hash of the URL), to avoid having thousands of files in a single folder — a filesystem optimization with no functional impact. |
+| `keys_zone=my_cache:10m` | Creates a named memory zone `my_cache`, of 10 MB, that stores cache metadata (which keys exist, where they point on disk, their state). This name is reused in `proxy_cache` to say "use that zone". |
+| `max_size=100m` | Maximum size of cached data on disk before Nginx starts removing the oldest entries. |
+| `inactive=60m` | If an entry in the cache is not accessed for 60 minutes, it is removed — regardless of its own freshness TTL. |
+| `use_temp_path=off` | Writes directly to the final cache directory rather than to a separate temporary directory — more performant, standard recommended practice. |
 
-### `proxy_cache` et directives associées — activer le cache dans un `location`
+### `proxy_cache` and related directives — enabling the cache in a `location`
 
-Une fois la zone déclarée dans `http {}`, on l'active route par route :
+Once the zone is declared in `http {}`, it is enabled route by route:
 
 ```nginx
 location /nginx-only {
@@ -146,40 +146,40 @@ location /nginx-only {
 }
 ```
 
-| Directive | Rôle |
+| Directive | Role |
 |---|---|
-| `proxy_cache my_cache` | Active le cache pour ce bloc `location`, en utilisant la zone `my_cache` définie plus haut. |
-| `proxy_cache_valid 200 60s` | Ne cache que les réponses avec un code HTTP 200 (succès), et les garde "fraîches" pendant 60 secondes — cohérent avec le TTL de 60 s côté Redis, pour comparer des durées équivalentes. |
-| `add_header X-Cache-Status $upstream_cache_status` | Ajoute un en-tête de réponse HTTP personnalisé qui indique si c'était un `HIT`, `MISS`, ou `EXPIRED` — utile pour observer en direct (avec `curl -i`) si Nginx a servi depuis son cache ou non. |
+| `proxy_cache my_cache` | Enables caching for this `location` block, using the `my_cache` zone defined above. |
+| `proxy_cache_valid 200 60s` | Only caches responses with an HTTP 200 (success) status code, and keeps them "fresh" for 60 seconds — consistent with the 60s TTL on the Redis side, for comparing equivalent durations. |
+| `add_header X-Cache-Status $upstream_cache_status` | Adds a custom HTTP response header indicating whether it was a `HIT`, `MISS`, or `EXPIRED` — useful for observing live (with `curl -i`) whether Nginx served from its cache or not. |
 
-### À retenir
+### Key takeaways
 
-1. Le load balancer distribue simplement ; il ne fait pas lui-même de caching lourd, hormis l'option `proxy_cache` si elle y est activée.
-2. Le vrai gain vient du *cache partagé* — ici via Redis — qui évite aux nœuds Web multiples des recalculs coûteux et garantit la cohérence des données temporaires entre toutes les instances.
+1. The load balancer simply distributes traffic; it does not itself do heavy caching, except for the `proxy_cache` option if enabled there.
+2. The real gain comes from *shared caching* — here via Redis — which spares the multiple Web nodes costly recalculations and ensures consistency of temporary data across all instances.
 
 ---
 
-## 7. Benchmark rapide
+## 7. Quick Benchmark
 
-Aucun outil de benchmark externe (type ApacheBench) n'est installé dans ce lab. La mesure se fait simplement avec `curl`, en observant le temps de réponse et l'en-tête `X-Cache-Status` sur chacune des 4 routes exposées par un web node :
+No external benchmarking tool (like ApacheBench) is installed in this lab. Measurement is done simply with `curl`, observing the response time and the `X-Cache-Status` header on each of the 4 routes exposed by a web node:
 
 ```bash
-# Temps de réponse + en-têtes, route par route
+# Response time + headers, route by route
 curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/none
 curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/nginx-only
 curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/redis-only
 curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/both
 
-# Répéter chaque appel une seconde fois pour voir l'effet du cache
+# Repeat each call a second time to see the cache effect
 ```
 
-Comportement attendu :
+Expected behavior:
 
 ```
-/none         -> ~1 s à chaque appel, X-Cache-Status: MISS à chaque fois (aucun cache)
-/nginx-only   -> ~1 s au 1er appel (MISS), quasi instantané ensuite (HIT) tant que < 60 s
-/redis-only   -> ~1 s au 1er appel, quasi instantané ensuite (source: redis-cache), mais X-Cache-Status reste MISS
-/both         -> ~1 s au 1er appel, quasi instantané ensuite, X-Cache-Status passe à HIT
+/none         -> ~1 s on every call, X-Cache-Status: MISS every time (no cache)
+/nginx-only   -> ~1 s on the 1st call (MISS), near-instant afterwards (HIT) as long as < 60 s
+/redis-only   -> ~1 s on the 1st call, near-instant afterwards (source: redis-cache), but X-Cache-Status stays MISS
+/both         -> ~1 s on the 1st call, near-instant afterwards, X-Cache-Status switches to HIT
 ```
 
-Ces chiffres sont approximatifs (le `time.sleep(1)` de l'app Flask fixe le délai simulé) ; ils montrent surtout **quelle couche** (Nginx, Redis, ou aucune) est responsable de l'accélération observée sur chaque route.
+These figures are approximate (the Flask app's `time.sleep(1)` sets the simulated delay); they mainly show **which layer** (Nginx, Redis, or none) is responsible for the observed speedup on each route.
