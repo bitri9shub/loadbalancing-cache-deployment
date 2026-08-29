@@ -165,10 +165,10 @@ Aucun outil de benchmark externe (type ApacheBench) n'est installé dans ce lab.
 
 ```bash
 # Temps de réponse + en-têtes, route par route
-curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.11/none
-curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.11/nginx-only
-curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.11/redis-only
-curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.11/both
+curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/none
+curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/nginx-only
+curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/redis-only
+curl -w "\ntime: %{time_total}s\n" -i http://192.168.56.10/both
 
 # Répéter chaque appel une seconde fois pour voir l'effet du cache
 ```
