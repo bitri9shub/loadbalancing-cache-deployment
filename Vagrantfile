@@ -1,8 +1,6 @@
-# -*- mode: ruby -*-
-# vi: set ft=ruby :
-
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
+  config.vbguest.auto_update = false
 
   # Load Balancer
   config.vm.define "lb" do |lb|
@@ -12,7 +10,7 @@ Vagrant.configure("2") do |config|
       vb.memory = "512"
       vb.cpus = 1
     end
-    lb.vm.provision "shell", path: "provision-lb.sh"
+    lb.vm.provision "shell", path: "provision/provision-lb.sh"
   end
 
   # Redis Centralisé
@@ -23,7 +21,7 @@ Vagrant.configure("2") do |config|
       vb.memory = "512"
       vb.cpus = 1
     end
-    redis.vm.provision "shell", path: "provision-redis.sh"
+    redis.vm.provision "shell", path: "provision/provision-redis.sh"
   end
 
   # Web nodes
@@ -35,7 +33,7 @@ Vagrant.configure("2") do |config|
         vb.memory = "512"
         vb.cpus = 1
       end
-      web.vm.provision "shell", path: "provision-web.sh"
+      web.vm.provision "shell", path: "provision/provision-web.sh"
     end
   end
 end
