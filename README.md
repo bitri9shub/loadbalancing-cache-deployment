@@ -59,7 +59,7 @@ Private networks allow internal access between all services without public expos
 
 ```bash
 # Clone the repo
-git clone https://github.com/<your-repo>/lb-lab.git
+git clone https://github.com/bitri9shub/lb-lab.git
 cd lb-lab
 
 # Verify VirtualBox + Vagrant are installed
